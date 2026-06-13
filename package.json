@@ -1,0 +1,18 @@
+{
+  "name": "fish-audio-tts-toolkit",
+  "version": "1.0.0",
+  "description": "Standalone Fish Audio TTS tagging + voice search toolkit extracted from AICHAT.",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "keywords": ["fish-audio", "tts", "voice-search", "emotion-tags", "express"],
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "fish-audio": "^0.1.0"
+  }
+}
