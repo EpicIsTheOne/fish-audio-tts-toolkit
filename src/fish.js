@@ -38,7 +38,7 @@ export function buildFishRealtimePayload({ settings, format = 'mp3' }) {
   };
 }
 
-export async function callFishTTS({ apiKey, baseUrl, backend = 's2-pro', payload }) {
+export async function callFishTTS({ apiKey, baseUrl, backend = 's2-pro', payload, signal = AbortSignal.timeout(120000) }) {
   const response = await fetch(`${baseUrl.replace(/\/$/, '')}/v1/tts`, {
     method: 'POST',
     headers: {
@@ -46,7 +46,8 @@ export async function callFishTTS({ apiKey, baseUrl, backend = 's2-pro', payload
       'Content-Type': 'application/json',
       model: backend
     },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
+    signal
   });
 
   if (!response.ok) {
@@ -66,37 +67,47 @@ export async function callFishTTS({ apiKey, baseUrl, backend = 's2-pro', payload
   return { buffer, contentType: response.headers.get('content-type') || getTtsContentType(payload.format) };
 }
 
-export async function streamFishTts({ apiKey, baseUrl, backend = 's2-pro', text, settings, onOpen = null, onChunk = null }) {
+export async function streamFishTts({ apiKey, baseUrl, backend = 's2-pro', text, settings, onOpen = null, onChunk = null, signal = null }) {
   const fishAudioClient = new FishAudioClient({ apiKey, baseUrl });
-  const request = buildFishRealtimePayload({ settings, format: 'mp3' });
+  const request = buildFishRealtimePayload({ settings, format: settings.ttsFormat });
   const connection = await fishAudioClient.textToSpeech.convertRealtime(request, (async function* generate() {
     yield normalizeTtsText(text);
   })(), backend);
 
-  const audioChunks = [];
+  let bytesReceived = 0;
   let settled = false;
 
   return await new Promise((resolve, reject) => {
+    const cleanup = () => signal?.removeEventListener('abort', handleAbort);
     const finishSuccess = () => {
       if (settled) return;
       settled = true;
-      resolve(Buffer.concat(audioChunks));
+      cleanup();
+      resolve({ bytesReceived });
     };
     const finishError = (error) => {
       if (settled) return;
       settled = true;
+      cleanup();
       try { connection.close(); } catch {}
       reject(error instanceof Error ? error : new Error(String(error || 'Fish realtime streaming failed')));
+    };
+    const handleAbort = () => {
+      const error = new Error('Fish realtime streaming was aborted');
+      error.name = 'AbortError';
+      finishError(error);
     };
 
     connection.on(RealtimeEvents.OPEN, () => { if (onOpen) onOpen(); });
     connection.on(RealtimeEvents.AUDIO_CHUNK, (chunk) => {
       const buffer = Buffer.from(chunk);
       if (!buffer.length) return;
-      audioChunks.push(buffer);
+      bytesReceived += buffer.length;
       if (onChunk) onChunk(buffer);
     });
     connection.on(RealtimeEvents.ERROR, (error) => finishError(error));
     connection.on(RealtimeEvents.CLOSE, () => finishSuccess());
+    if (signal?.aborted) handleAbort();
+    else signal?.addEventListener('abort', handleAbort, { once: true });
   });
 }

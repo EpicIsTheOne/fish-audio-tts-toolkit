@@ -59,7 +59,7 @@ examples/python/
 ## Installation
 
 ```bash
-git clone https://github.com/<you>/fish-audio-tts-toolkit.git
+git clone https://github.com/EpicIsTheOne/fish-audio-tts-toolkit.git
 cd fish-audio-tts-toolkit
 cp .env.example .env
 npm install
@@ -69,11 +69,16 @@ Set your `.env`:
 
 ```env
 PORT=3027
+HOST=127.0.0.1
 FISH_AUDIO_API_KEY=your_fish_api_key_here
 FISH_AUDIO_BASE_URL=https://api.fish.audio
 FISH_TTS_BACKEND=s2-pro
 DEFAULT_FISH_REFERENCE_ID=
-DEFAULT_FISH_VOICE_LABEL=Default Fish Voice
+FISH_HELPER_API_KEY=
+FISH_REQUEST_TIMEOUT_MS=120000
+FISH_AUDIO_RATE_LIMIT=30
+FISH_AUDIO_RATE_WINDOW_MS=60000
+FISH_MODEL_CACHE_ENTRIES=100
 ```
 
 Start it:
@@ -86,6 +91,15 @@ Server will come up on:
 
 ```text
 http://127.0.0.1:3027
+```
+
+The helper binds only to `127.0.0.1` by default. If you deliberately set `HOST=0.0.0.0` or another remote-facing address, you must also set `FISH_HELPER_API_KEY`; startup refuses an unauthenticated remote binding.
+
+When `FISH_HELPER_API_KEY` is set, send it with API requests using either:
+
+```text
+Authorization: Bearer YOUR_HELPER_KEY
+X-Fish-Helper-Key: YOUR_HELPER_KEY
 ```
 
 ---
@@ -210,7 +224,7 @@ Request body:
 ```json
 {
   "text": "your text here",
-  "voiceId": "fish_reference_id",
+  "voiceId": "fish_reference_id (optional when DEFAULT_FISH_REFERENCE_ID is set)",
   "format": "mp3",
   "latency": "low",
   "includeAsteriskNarration": false,
@@ -285,7 +299,23 @@ If text already contains inline Fish tags like:
 [whisper] come here
 ```
 
-…it preserves them instead of inventing new ones.
+…it preserves recognized square-bracket tags exactly where they appear in the text sent to Fish. Parentheses and unknown bracketed phrases remain ordinary speech, preventing accidental commands from normal prose.
+
+Explicit tags are never duplicated for intensity. Automatically inferred high-intensity tags may still be repeated intentionally.
+
+Markdown bold and simple underscore emphasis are unwrapped without deleting their text; identifiers such as `_snake_case_` are preserved. Single-asterisk roleplay actions are removed unless `includeAsteriskNarration` is enabled.
+
+---
+
+## Development checks
+
+```bash
+npm test
+npm run check
+npm audit
+```
+
+The tests cover explicit emotion tags, narration cleanup, streaming formats, cache bounds, API authentication, local binding safety, and request validation.
 
 ---
 

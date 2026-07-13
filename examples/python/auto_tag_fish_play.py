@@ -51,13 +51,16 @@ def auto_tag_and_play(text: str, voice_id: str):
         tmp.write(audio_response.content)
         tmp_path = Path(tmp.name)
 
-    print('Input text:     ', text)
-    print('Spoken text:    ', tag_result.get('spokenText'))
-    print('Auto tags:      ', tag_result.get('tags'))
-    print('Tagged text:    ', tag_result.get('taggedText'))
-    print('Saved audio to: ', tmp_path)
-    print('Playing now...')
-    playsound(str(tmp_path))
+    try:
+        print('Input text:     ', text)
+        print('Spoken text:    ', tag_result.get('spokenText'))
+        print('Auto tags:      ', tag_result.get('tags'))
+        print('Tagged text:    ', tag_result.get('taggedText'))
+        print('Temporary audio:', tmp_path)
+        print('Playing now...')
+        playsound(str(tmp_path))
+    finally:
+        tmp_path.unlink(missing_ok=True)
 
 
 if __name__ == '__main__':

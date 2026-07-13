@@ -104,7 +104,7 @@ export function buildFishMatchDetails(query, model, hints = null) {
   return { score, reasons };
 }
 
-export async function fetchFishModels({ apiKey, baseUrl, cache, ttlMs = 300000, params = {} }) {
+export async function fetchFishModels({ apiKey, baseUrl, cache = new Map(), ttlMs = 300000, maxCacheEntries = 100, params = {}, signal = AbortSignal.timeout(30000) }) {
   const searchParams = new URLSearchParams();
   for (const [key, rawValue] of Object.entries(params || {})) {
     if (rawValue === undefined || rawValue === null || rawValue === '') continue;
@@ -117,10 +117,16 @@ export async function fetchFishModels({ apiKey, baseUrl, cache, ttlMs = 300000, 
 
   const cacheKey = searchParams.toString();
   const cached = cache.get(cacheKey);
-  if (cached && (Date.now() - cached.at) < ttlMs) return cached.value;
+  if (cached && (Date.now() - cached.at) < ttlMs) {
+    cache.delete(cacheKey);
+    cache.set(cacheKey, cached);
+    return cached.value;
+  }
+  if (cached) cache.delete(cacheKey);
 
   const response = await fetch(`${baseUrl.replace(/\/$/, '')}/model?${searchParams.toString()}`, {
-    headers: { Authorization: `Bearer ${apiKey}` }
+    headers: { Authorization: `Bearer ${apiKey}` },
+    signal
   });
 
   if (!response.ok) {
@@ -133,10 +139,11 @@ export async function fetchFishModels({ apiKey, baseUrl, cache, ttlMs = 300000, 
   const json = await response.json().catch(() => ({}));
   const value = { total: Number(json?.total || 0), items: Array.isArray(json?.items) ? json.items : [], has_more: Boolean(json?.has_more) };
   cache.set(cacheKey, { at: Date.now(), value });
+  while (cache.size > Math.max(1, maxCacheEntries)) cache.delete(cache.keys().next().value);
   return value;
 }
 
-export async function searchFishModelsByName(query, { apiKey, baseUrl, cache, ttlMs = 300000, limit = 8, pageSize = 12, character = null, hints = null } = {}) {
+export async function searchFishModelsByName(query, { apiKey, baseUrl, cache, ttlMs = 300000, maxCacheEntries = 100, limit = 8, pageSize = 12, character = null, hints = null, signal } = {}) {
   const normalizedQuery = normalizeVoiceSearchText(query);
   if (!normalizedQuery) return { query, items: [], bestMatch: null };
 
@@ -149,7 +156,7 @@ export async function searchFishModelsByName(query, { apiKey, baseUrl, cache, tt
   const batches = [];
   for (const lookup of lookups) {
     try {
-      const batch = await fetchFishModels({ apiKey, baseUrl, cache, ttlMs, params: lookup });
+      const batch = await fetchFishModels({ apiKey, baseUrl, cache, ttlMs, maxCacheEntries, params: lookup, signal });
       batches.push(...batch.items);
     } catch (error) {
       if (!batches.length) throw error;
@@ -166,7 +173,7 @@ export async function searchFishModelsByName(query, { apiKey, baseUrl, cache, tt
     .sort((a, b) => (b._matchScore - a._matchScore) || Number(b?.task_count || 0) - Number(a?.task_count || 0));
 
   if (!items.length) {
-    const fallback = await fetchFishModels({ apiKey, baseUrl, cache, ttlMs, params: { page_size: pageSize, sort_by: 'score' } }).catch(() => ({ items: [] }));
+    const fallback = await fetchFishModels({ apiKey, baseUrl, cache, ttlMs, maxCacheEntries, params: { page_size: pageSize, sort_by: 'score' }, signal }).catch(() => ({ items: [] }));
     items = dedupeModelsById(fallback.items)
       .filter((item) => item?.state === 'trained' && item?.dmca_taken_down !== true && item?.visibility !== 'private')
       .map((item) => {
