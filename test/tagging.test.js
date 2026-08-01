@@ -69,6 +69,32 @@ test('conservative mode suppresses weak ambiguous cues while expressive can use 
   assert.deepEqual(expressive.tags, ['soft gentle tone']);
 });
 
+test('voice break and relief recovery are tagged in the target sentence', async () => {
+  for (const mode of ['conservative', 'expressive']) {
+    const result = await tagTtsText({ text: 'Her voice breaks, then she steadies herself with relief.', mode });
+    assert.equal(result.spokenText, 'Her voice breaks, then she steadies herself with relief.');
+    assert.equal(result.taggedText, '[shaky voice] [calm steady tone] Her voice breaks, then she steadies herself with relief.');
+    assert.deepEqual(result.tags, ['shaky voice', 'calm steady tone']);
+  }
+});
+
+test('break and relief mappings stay conservative around negation and semantic mentions', async () => {
+  for (const text of [
+    'Her voice does not break, and she does not steady herself with relief.',
+    "The phrase 'voice breaks' appears in the notes, and the report discusses relief."
+  ]) {
+    assert.deepEqual((await tagTtsText({ text, mode: 'expressive' })).tags, []);
+  }
+});
+
+test('break and recovery directions remain placed within mixed clauses', async () => {
+  const result = await tagTtsText({ text: 'Her voice breaks. Then she steadies herself with relief. Finally, she speaks normally.' });
+  assert.match(result.taggedText, /^\[shaky voice\] Her voice breaks\./);
+  assert.match(result.taggedText, /\[calm steady tone\] Then she steadies herself with relief\./);
+  assert.match(result.taggedText, /Finally, she speaks normally\.$/);
+  assert.deepEqual(result.tags, ['shaky voice', 'calm steady tone']);
+});
+
 test('inferred intensity is bounded and output remains idempotent', async () => {
   const first = await tagTtsText({ text: 'She screams and screams and screams!' });
   assert.equal(first.taggedText, '[screaming] She screams and screams and screams!');

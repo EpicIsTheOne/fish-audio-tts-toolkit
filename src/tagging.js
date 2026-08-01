@@ -117,7 +117,7 @@ const TTS_DELIVERY_CUES = [
   { tag: 'loud moan', category: 'nonverbal', weight: 8, patterns: [/\bloud\s+moan(?:ing|s|ed)?\b/i, /\bintense\s+moan(?:ing|s|ed)?\b/i, /\bdesperate\s+moan(?:ing|s|ed)?\b/i, /\bdeep\s+moan(?:ing|s|ed)?\b/i] },
   { tag: 'soft moan', category: 'nonverbal', weight: 6, patterns: [/\bsoft\s+moan(?:ing|s|ed)?\b/i, /\bquiet\s+moan(?:ing|s|ed)?\b/i, /\bmuffled\s+moan(?:ing|s|ed)?\b/i, /\bsmall\s+moan(?:ing|s|ed)?\b/i] },
   { tag: 'breathless', category: 'delivery', weight: 4, patterns: [/\bbreathless(?:ly)?\b/i, /\bpant(?:ing|s|ed)?\b/i] },
-  { tag: 'shaky voice', category: 'delivery', weight: 5, patterns: [/\bvoice trembl(?:es|ed|ing)\b/i, /\btrembl(?:ing|es|ed)?\b/i, /\bshak(?:y|ily)\b/i] },
+  { tag: 'shaky voice', category: 'delivery', weight: 5, patterns: [/\bvoice trembl(?:es|ed|ing)\b/i, /\b(?:her|his|their|my|your)\s+voice\s+(?:breaks?|broke|is\s+breaking|cracks?|cracked)\b/i, /\btrembl(?:ing|es|ed)?\b/i, /\bshak(?:y|ily)\b/i] },
   { tag: 'sad soft voice', category: 'emotion', weight: 4, patterns: [/\bsad(?:ly)?\b/i, /\bmournful(?:ly)?\b/i, /\bheartbroken\b/i, /\btearful\b/i] },
   { tag: 'crying', category: 'nonverbal', weight: 5, patterns: [/\bcry(?:ing|s|ied)?\b/i, /\bsob(?:bing|s|bed)?\b/i] },
   { tag: 'nervous hesitant voice', category: 'emotion', weight: 4, patterns: [/\bnervous(?:ly)?\b/i, /\bhesitant(?:ly)?\b/i, /\banxious(?:ly)?\b/i] },
@@ -129,7 +129,7 @@ const TTS_DELIVERY_CUES = [
   { tag: 'sarcastic', category: 'delivery', weight: 4, patterns: [/\bsarcastic(?:ally)?\b/i, /\bdryly\b/i] },
   { tag: 'excited bright voice', category: 'emotion', weight: 4, patterns: [/\bexcited(?:ly)?\b/i, /\beager(?:ly)?\b/i, /\bthrilled\b/i, /\benthusiastic(?:ally)?\b/i] },
   { tag: 'surprised', category: 'emotion', weight: 4, patterns: [/\bsurprised\b/i, /\bstunned\b/i, /\bstartled\b/i] },
-  { tag: 'calm steady tone', category: 'delivery', weight: 3, patterns: [/\bcalm(?:ly)?\b/i, /\bsteady\b/i] },
+  { tag: 'calm steady tone', category: 'delivery', weight: 3, patterns: [/\bcalm(?:ly)?\b/i, /\bsteady\b/i, /\bstead(?:ies|ied|ying)\s+(?:herself|himself|themselves|myself|yourself|itself)\b/i, /\brecover(?:s|ed|ing)?\s+(?:(?:her|his|their|my|your)\s+)?(?:composure|breath|voice)\b/i, /\b(?:she|he|they|i|we|you)\s+(?:sigh(?:s|ed|ing)?|exhale(?:s|d|ing)?|relax(?:es|ed|ing)?|stead(?:ies|ied|ying)|recover(?:s|ed|ing)?|regain(?:s|ed|ing)?)\b[^.!?]{0,24}\b(?:with|in)\s+relief\b/i] },
   { tag: 'commanding voice', category: 'delivery', weight: 4, patterns: [/\bcommand(?:s|ed|ing)?\b/i, /\bauthoritative(?:ly)?\b/i] },
   { tag: 'loud', category: 'volume', weight: 4, patterns: [/\bshout(?:ing|s|ed)?\b/i, /\byell(?:ing|s|ed)?\b/i, /\bloud(?:ly)?\b/i] },
   { tag: 'screaming', category: 'volume', weight: 5, patterns: [/\bscream(?:ing|s|ed)?\b/i, /\bshriek(?:ing|s|ed)?\b/i] }
@@ -223,7 +223,8 @@ function cueHasStrongEvidence(cue, text) {
     const source = pattern.source.toLowerCase();
     return source.includes('whisper') || source.includes('scream') || source.includes('moan')
       || source.includes('laugh') || source.includes('gasp') || source.includes('cry')
-      || source.includes('sob') || source.includes('whimper');
+      || source.includes('sob') || source.includes('whimper')
+      || source.includes('break') || source.includes('recover') || source.includes('relief');
   }) || /\b(?:voice|tone|shout|yell|scream|whisper|moan|gasp|sob|laugh)\b/i.test(text);
 }
 
@@ -252,7 +253,10 @@ export function inferTtsDeliveryTagsDetailed(context = '', speech = '', options 
     if (picked.includes(item.tag)) continue;
     if (item.tag === 'laughing' && picked.includes('soft laugh')) continue;
     if (item.tag === 'gasp' && picked.includes('soft gasp')) continue;
-    if (categories.has(item.category) && item.category !== 'nonverbal') continue;
+    const isBreakRecoveryPair = item.category === 'delivery'
+      && ((item.tag === 'shaky voice' && picked.includes('calm steady tone'))
+        || (item.tag === 'calm steady tone' && picked.includes('shaky voice')));
+    if (categories.has(item.category) && item.category !== 'nonverbal' && !isBreakRecoveryPair) continue;
     picked.push(item.tag);
     categories.add(item.category);
     reasoning.push({ tag: item.tag, confidence: Math.min(1, item.score / 10), evidence: item.matches });
