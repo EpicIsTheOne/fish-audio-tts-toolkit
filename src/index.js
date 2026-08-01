@@ -125,8 +125,8 @@ export function createApp(configOverrides = {}) {
 
   app.post('/api/tts/tag', async (req, res) => {
     try {
-      const { text, includeAsteriskNarration = false } = req.body || {};
-      const result = await tagTtsText({ text, includeAsteriskNarration });
+      const { text, includeAsteriskNarration = false, mode = 'conservative' } = req.body || {};
+      const result = await tagTtsText({ text, includeAsteriskNarration, mode });
       res.json(result);
     } catch (error) {
       res.status(getErrorStatus(error, 500)).json({ ok: false, error: String(error?.message || error) });
@@ -141,11 +141,11 @@ export function createApp(configOverrides = {}) {
     res.once('close', abortOnDisconnect);
 
     try {
-      const { text, voiceId, fishReferenceId, referenceId, format = 'mp3', latency = 'low', includeAsteriskNarration = false, stream = false } = req.body || {};
+      const { text, voiceId, fishReferenceId, referenceId, format = 'mp3', latency = 'low', includeAsteriskNarration = false, mode = 'conservative', stream = false } = req.body || {};
       const resolvedVoiceId = String(voiceId || fishReferenceId || referenceId || config.defaultVoiceId || '').trim();
       if (!resolvedVoiceId) return res.status(400).json({ ok: false, error: 'voiceId/referenceId is required when DEFAULT_FISH_REFERENCE_ID is not set' });
 
-      const tagResult = await tagTtsText({ text, includeAsteriskNarration });
+      const tagResult = await tagTtsText({ text, includeAsteriskNarration, mode });
       const settings = buildDirectFishTtsSettings({ voiceId: resolvedVoiceId, format, latency, includeAsteriskNarration });
       const payload = buildFishTtsPayload({ text: tagResult.taggedText, settings });
 

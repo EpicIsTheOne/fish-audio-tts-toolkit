@@ -189,9 +189,7 @@ export function parseTtsEmotionTags(value = '') {
 }
 
 function getTtsTagIntensity(tag = '') {
-  const normalized = String(tag || '').trim().toLowerCase();
-  if (normalized === 'loud moan' || normalized === 'screaming') return 3;
-  if (normalized === 'loud' || normalized === 'soft moan' || normalized === 'whimper') return 2;
+  // Repetition is an explicit authoring choice, not an automatic intensity dial.
   return 1;
 }
 
@@ -216,28 +214,39 @@ export function formatTtsEmotionTags(tags = [], options = {}) {
   return expanded.join(' ');
 }
 
-export function inferTtsDeliveryTags(context = '', speech = '', options = {}) {
-  const haystack = `${context || ''} ${speech || ''}`.replace(/\s+/g, ' ').trim();
+function normalizeTagMode(mode) {
+  return String(mode || '').toLowerCase() === 'expressive' ? 'expressive' : 'conservative';
+}
+
+function cueHasStrongEvidence(cue, text) {
+  return cue.weight >= 4 || cue.patterns.some((pattern) => {
+    const source = pattern.source.toLowerCase();
+    return source.includes('whisper') || source.includes('scream') || source.includes('moan')
+      || source.includes('laugh') || source.includes('gasp') || source.includes('cry')
+      || source.includes('sob') || source.includes('whimper');
+  }) || /\b(?:voice|tone|shout|yell|scream|whisper|moan|gasp|sob|laugh)\b/i.test(text);
+}
+
+export function inferTtsDeliveryTagsDetailed(context = '', speech = '', options = {}) {
+  const mode = normalizeTagMode(options.mode);
+  const contextText = String(context || '').replace(/\s+/g, ' ').trim();
+  const speechText = String(speech || '').replace(/\s+/g, ' ').trim();
+  const haystack = `${contextText} ${speechText}`.trim();
   const maxPicked = Number.isFinite(options.maxTags) ? Math.max(1, Math.min(24, Math.floor(options.maxTags))) : 10;
-  if (!haystack) return [];
+  if (!haystack) return { tags: [], reasoning: [], confidence: 0 };
 
   const scored = [];
   for (const cue of TTS_DELIVERY_CUES) {
     let matches = 0;
     for (const pattern of cue.patterns) matches += countPatternMatches(haystack, pattern);
-    if (!matches) continue;
-    scored.push({ tag: cue.tag, category: cue.category, score: cue.weight + Math.min(matches, 3) });
-  }
-
-  if (/\b(moan(?:ing|s|ed)?|a+hn+|a+hh+|u+n+n+h+|n+g+h+|m+m+h+)\b/i.test(haystack)) {
-    const loud = scored.find((x) => x.tag === 'loud moan');
-    const soft = scored.find((x) => x.tag === 'soft moan');
-    if (loud) loud.score += 3;
-    if (soft) soft.score += 2;
+    if (!matches || (mode === 'conservative' && !cueHasStrongEvidence(cue, haystack))) continue;
+    const score = cue.weight + Math.min(matches, 3) + (contextText ? 1 : 0);
+    scored.push({ tag: cue.tag, category: cue.category, score, matches });
   }
 
   scored.sort((a, b) => b.score - a.score);
   const picked = [];
+  const reasoning = [];
   const categories = new Set();
   for (const item of scored) {
     if (picked.includes(item.tag)) continue;
@@ -246,63 +255,81 @@ export function inferTtsDeliveryTags(context = '', speech = '', options = {}) {
     if (categories.has(item.category) && item.category !== 'nonverbal') continue;
     picked.push(item.tag);
     categories.add(item.category);
+    reasoning.push({ tag: item.tag, confidence: Math.min(1, item.score / 10), evidence: item.matches });
     if (picked.length >= maxPicked) break;
   }
-  return picked;
+  return { tags: picked, reasoning, confidence: reasoning.length ? Math.max(...reasoning.map((x) => x.confidence)) : 0 };
+}
+
+export function inferTtsDeliveryTags(context = '', speech = '', options = {}) {
+  return inferTtsDeliveryTagsDetailed(context, speech, options).tags;
+}
+
+function splitSpeechClauses(text) {
+  return text.match(/[^.!?]+(?:[.!?]+|$)/g)?.map((clause) => clause.trim()).filter(Boolean) || [];
+}
+
+function extractNarrationDirection(raw) {
+  return [...String(raw || '').matchAll(/\*{1,2}([^*\r\n]{1,500})\*{1,2}|_{1,2}([^_\r\n]{1,500})_{1,2}/g)]
+    .map((match) => match[1] || match[2])
+    .map((value) => value.trim()).filter(Boolean).join(' ');
+}
+
+function inferClauseResults(rawText, options = {}) {
+  const includeAsteriskNarration = options.includeAsteriskNarration === true;
+  const speech = cleanTtsSpeechText(stripRpNarrationForTts(rawText, { includeAsteriskNarration }));
+  const narration = includeAsteriskNarration ? '' : extractNarrationDirection(rawText);
+  const mode = normalizeTagMode(options.mode);
+  const maxTags = getTtsTagLimitForText(speech || rawText);
+  return splitSpeechClauses(speech).map((clause) => {
+    const hasExplicit = hasInlineFishEmotionTags(clause);
+    const detail = hasExplicit
+      ? { tags: parseTtsEmotionTags(clause), reasoning: [], confidence: 1 }
+      : inferTtsDeliveryTagsDetailed(narration, clause, { maxTags, mode });
+    return { clause, hasExplicit, ...detail };
+  });
 }
 
 export function renderFishDirectedTtsText(rawText = '', options = {}) {
   const raw = String(rawText || '').trim();
   const includeAsteriskNarration = options.includeAsteriskNarration === true;
-  const speech = cleanTtsSpeechText(stripRpNarrationForTts(raw, { includeAsteriskNarration }));
-  const maxTags = getTtsTagLimitForText(speech || raw);
-  const clauses = speech.match(/[^.!?]+(?:[.!?]+|$)/g)?.map((clause) => clause.trim()).filter(Boolean) || [];
-  const clauseResults = clauses.map((clause) => ({ clause, tags: inferTtsDeliveryTags(clause, '', { maxTags }) }));
-  const useClauseTags = clauses.length > 1 && clauseResults.some((result) => result.tags.length);
-  if (useClauseTags) {
+  const clauseResults = inferClauseResults(raw, options);
+  const maxTags = getTtsTagLimitForText(raw);
+  if (clauseResults.length) {
     const tags = capTtsEmotionTagRepeats(clauseResults.flatMap((result) => result.tags), 1, maxTags);
-    const text = clauseResults.map(({ clause, tags: clauseTags }) => {
-      const tagText = formatTtsEmotionTags(clauseTags, { maxTags });
+    const text = clauseResults.map(({ clause, tags: clauseTags, hasExplicit }) => {
+      const tagText = hasExplicit ? '' : formatTtsEmotionTags(clauseTags, { maxTags });
       return cleanTtsSpeechText(`${tagText ? `${tagText} ` : ''}${clause}`);
     }).join(' ');
-    return { text, tags };
+    return { text, tags, reasoning: clauseResults.flatMap((result) => result.reasoning || []), confidence: Math.max(0, ...clauseResults.map((result) => result.confidence || 0)) };
   }
-
-  const tags = inferTtsDeliveryTags(raw, '', { maxTags });
-  const cappedTags = capTtsEmotionTagRepeats(tags, 1, maxTags);
-  const tagText = formatTtsEmotionTags(cappedTags, { maxTags });
-  const text = speech ? cleanTtsSpeechText(`${tagText ? `${tagText} ` : ''}${speech}`) : normalizeTtsText(raw);
-  return { text, tags: cappedTags };
+  return { text: normalizeTtsText(raw), tags: [], reasoning: [], confidence: 0 };
 }
 
-export async function tagTtsText({ text, includeAsteriskNarration = false } = {}) {
+export async function tagTtsText({ text, includeAsteriskNarration = false, mode = 'conservative' } = {}) {
   const rawText = String(text || '').trim();
   const spokenText = cleanTtsSpeechText(stripRpNarrationForTts(rawText, { includeAsteriskNarration }));
   const normalizedText = normalizeTtsText(spokenText || rawText);
 
-  if (hasInlineFishEmotionTags(normalizedText)) {
-    const maxTags = getTtsTagLimitForText(normalizedText);
-    const inlineTags = capTtsEmotionTagRepeats(parseTtsEmotionTags(normalizedText), 1, maxTags);
-    const mergedTagText = inlineTags.map((tag) => `[${tag}]`).join(' ');
-    const textWithoutTags = stripInlineFishEmotionTags(normalizedText);
-    if (!textWithoutTags) {
-      const error = new Error('Text must include speech in addition to emotion tags');
-      error.statusCode = 400;
-      throw error;
-    }
-    const taggedText = normalizedText;
-    return { ok: true, input: rawText, taggedText, text: taggedText, tags: inlineTags, tag: mergedTagText, spokenText: textWithoutTags };
+  const textWithoutTags = stripInlineFishEmotionTags(normalizedText);
+  if (hasInlineFishEmotionTags(normalizedText) && !textWithoutTags) {
+    const error = new Error('Text must include speech in addition to emotion tags');
+    error.statusCode = 400;
+    throw error;
   }
-
-  const directed = renderFishDirectedTtsText(rawText, { includeAsteriskNarration });
+  const directed = renderFishDirectedTtsText(rawText, { includeAsteriskNarration, mode });
   const taggedText = normalizeTtsText(directed.text || spokenText || rawText);
+  const tags = capTtsEmotionTagRepeats([...parseTtsEmotionTags(taggedText)], 1, getTtsTagLimitForText(rawText));
   return {
     ok: true,
     input: rawText,
     taggedText,
     text: taggedText,
-    tags: directed.tags,
-    tag: formatTtsEmotionTags(directed.tags, { maxTags: getTtsTagLimitForText(rawText) }),
-    spokenText: cleanTtsSpeechText(spokenText)
+    tags,
+    tag: formatTtsEmotionTags(tags, { maxTags: getTtsTagLimitForText(rawText) }),
+    spokenText: cleanTtsSpeechText(stripInlineFishEmotionTags(taggedText)),
+    confidence: directed.confidence,
+    reasoning: directed.reasoning,
+    mode: normalizeTagMode(mode)
   };
 }

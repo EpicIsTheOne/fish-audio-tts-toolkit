@@ -48,6 +48,34 @@ test('delivery changes are tagged per clause', async () => {
   assert.deepEqual(result.tags, ['whisper', 'screaming']);
 });
 
+test('manual tags stay locked while later clauses are inferred', async () => {
+  const result = await tagTtsText({ text: '[whisper] Come here. Then she screams. "Run!"' });
+  assert.match(result.taggedText, /^\[whisper\] Come here\./);
+  assert.match(result.taggedText, /\[screaming\] Then she screams\./);
+  assert.match(result.taggedText, /\[screaming\] Then she screams\. Run!$/);
+  assert.deepEqual(result.tags, ['whisper', 'screaming']);
+});
+
+test('narration direction informs speech without being spoken', async () => {
+  const result = await tagTtsText({ text: '*she whispers softly* "Come closer."' });
+  assert.equal(result.spokenText, 'Come closer.');
+  assert.equal(result.taggedText, '[whisper] Come closer.');
+});
+
+test('conservative mode suppresses weak ambiguous cues while expressive can use them', async () => {
+  const conservative = await tagTtsText({ text: 'The room has a soft blue light.' });
+  const expressive = await tagTtsText({ text: 'The room has a soft blue light.', mode: 'expressive' });
+  assert.deepEqual(conservative.tags, []);
+  assert.deepEqual(expressive.tags, ['soft gentle tone']);
+});
+
+test('inferred intensity is bounded and output remains idempotent', async () => {
+  const first = await tagTtsText({ text: 'She screams and screams and screams!' });
+  assert.equal(first.taggedText, '[screaming] She screams and screams and screams!');
+  const second = await tagTtsText({ text: first.taggedText });
+  assert.equal(second.taggedText, first.taggedText);
+});
+
 test('tagging normalized output is idempotent', async () => {
   for (const text of ['*she laughs softly* "Hello."', '[whisper] hello [loud] world', 'Ordinary speech.']) {
     const first = await tagTtsText({ text });
