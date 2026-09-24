@@ -8,9 +8,9 @@ export function getTtsContentType(format = 'mp3') {
   return 'audio/mpeg';
 }
 
-export function buildDirectFishTtsSettings({ voiceId, format = 'mp3', latency = 'low', includeAsteriskNarration = false } = {}) {
+export function buildDirectFishTtsSettings({ voiceId, voiceIds, format = 'mp3', latency = 'low', includeAsteriskNarration = false } = {}) {
   return {
-    fishReferenceId: String(voiceId || '').trim(),
+    fishReferenceId: voiceIds || String(voiceId || '').trim(),
     ttsFormat: ['wav', 'pcm', 'mp3', 'opus'].includes(String(format || '').trim()) ? String(format || '').trim() : 'mp3',
     ttsLatency: ['low', 'normal', 'balanced'].includes(String(latency || '').trim()) ? String(latency || '').trim() : 'low',
     ttsReadNarration: includeAsteriskNarration === true
@@ -20,7 +20,7 @@ export function buildDirectFishTtsSettings({ voiceId, format = 'mp3', latency = 
 export function buildFishTtsPayload({ text, settings }) {
   return {
     text: normalizeTtsText(text),
-    reference_id: String(settings.fishReferenceId || '').trim(),
+    reference_id: settings.fishReferenceId,
     format: settings.ttsFormat || 'mp3',
     latency: settings.ttsLatency || 'low'
   };
@@ -29,7 +29,7 @@ export function buildFishTtsPayload({ text, settings }) {
 export function buildFishRealtimePayload({ settings, format = 'mp3' }) {
   return {
     text: '',
-    reference_id: String(settings.fishReferenceId || '').trim(),
+    reference_id: settings.fishReferenceId,
     format: ['wav', 'pcm', 'mp3', 'opus'].includes(String(format || '').trim()) ? String(format || '').trim() : 'mp3',
     latency: ['low', 'normal', 'balanced'].includes(String(settings.ttsLatency || '').trim()) ? String(settings.ttsLatency || '').trim() : 'low',
     chunk_length: 140,
@@ -38,7 +38,7 @@ export function buildFishRealtimePayload({ settings, format = 'mp3' }) {
   };
 }
 
-export async function callFishTTS({ apiKey, baseUrl, backend = 's2-pro', payload, signal = AbortSignal.timeout(120000) }) {
+export async function callFishTTS({ apiKey, baseUrl, backend = 'drama-3-preview', payload, signal = AbortSignal.timeout(120000) }) {
   const response = await fetch(`${baseUrl.replace(/\/$/, '')}/v1/tts`, {
     method: 'POST',
     headers: {
@@ -67,7 +67,7 @@ export async function callFishTTS({ apiKey, baseUrl, backend = 's2-pro', payload
   return { buffer, contentType: response.headers.get('content-type') || getTtsContentType(payload.format) };
 }
 
-export async function streamFishTts({ apiKey, baseUrl, backend = 's2-pro', text, settings, onOpen = null, onChunk = null, signal = null }) {
+export async function streamFishTts({ apiKey, baseUrl, backend = 'drama-3-preview', text, settings, onOpen = null, onChunk = null, signal = null }) {
   const fishAudioClient = new FishAudioClient({ apiKey, baseUrl });
   const request = buildFishRealtimePayload({ settings, format: settings.ttsFormat });
   const connection = await fishAudioClient.textToSpeech.convertRealtime(request, (async function* generate() {

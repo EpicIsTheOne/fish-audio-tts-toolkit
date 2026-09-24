@@ -20,13 +20,7 @@ Instead of sending raw text straight into Fish Audio and hoping for the best, th
 
 1. **normalize** messy roleplay/chat text
 2. **strip narration noise**
-3. **infer delivery tags** like:
-   - `[whisper]`
-   - `[soft laugh]`
-   - `[teasing amused tone]`
-   - `[shaky voice]`
-   - `[soft moan]`
-   - `[loud moan]`
+3. **infer delivery directions** such as a soft whisper, gentle laugh, or shaky voice
 4. **search Fish voices intelligently** by name
 5. **generate audio** through Fish Audio
 6. optionally **stream** audio back to the caller
@@ -38,7 +32,8 @@ Instead of sending raw text straight into Fish Audio and hoping for the best, th
 ```text
 src/
   index.js        # Express server
-  tagging.js      # auto-tagging + text normalization logic
+  tagging.js      # legacy S2 tagging + text normalization logic
+  drama3.js       # Drama 3 natural-language delivery directions
   search.js       # Fish voice search + ranking system
   fish.js         # Fish Audio HTTP + realtime helpers
 examples/python/
@@ -72,7 +67,7 @@ PORT=3027
 HOST=127.0.0.1
 FISH_AUDIO_API_KEY=your_fish_api_key_here
 FISH_AUDIO_BASE_URL=https://api.fish.audio
-FISH_TTS_BACKEND=s2-pro
+FISH_TTS_BACKEND=drama-3-preview
 DEFAULT_FISH_REFERENCE_ID=
 FISH_HELPER_API_KEY=
 FISH_REQUEST_TIMEOUT_MS=120000
@@ -94,6 +89,8 @@ http://127.0.0.1:3027
 ```
 
 The helper binds only to `127.0.0.1` by default. If you deliberately set `HOST=0.0.0.0` or another remote-facing address, you must also set `FISH_HELPER_API_KEY`; startup refuses an unauthenticated remote binding.
+
+`drama-3-preview` is the default backend. It receives plain-language directions such as `[Speak in a close, soft whisper.]` instead of the legacy fixed tags. Set `FISH_TTS_BACKEND=s2-pro` to keep the old path as the server default, or send `"backend": "s2-pro"` on an individual tag or audio request. `s2.1-pro` and `s2.1-pro-free` also use the legacy tagger. Drama 3 is a preview model, so its availability and output may change.
 
 When `FISH_HELPER_API_KEY` is set, send it with API requests using either:
 
@@ -128,11 +125,14 @@ Example response:
 {
   "ok": true,
   "input": "*she laughs softly* \"You are unbelievably cute when you fail.\"",
-  "taggedText": "[soft laugh] [teasing amused tone] You are unbelievably cute when you fail.",
-  "tags": ["soft laugh", "teasing amused tone"],
+  "taggedText": "[Give a small, soft laugh before speaking.] You are unbelievably cute when you fail.",
+  "tags": ["soft laugh"],
+  "directions": ["Give a small, soft laugh before speaking."],
   "spokenText": "You are unbelievably cute when you fail."
 }
 ```
+
+The full response also includes `backend` and `tagger`. The `tags` field retains the cue labels for inspection, while `taggedText` is the text sent to the selected backend.
 
 ### 3) Generate Fish Audio
 
@@ -144,9 +144,11 @@ curl -X POST http://127.0.0.1:3027/api/tts/audio \
     "text": "*she laughs softly* \"You are unbelievably cute when you fail.\"",
     "voiceId": "YOUR_FISH_REFERENCE_ID",
     "format": "mp3",
-    "latency": "low"
+    "direction": "Start gently, then build urgency."
   }'
 ```
+
+Drama 3 uses `normal` latency when you omit the field. The legacy S2 path retains `low` as its helper default.
 
 ### 4) Stream Fish Audio
 
@@ -160,6 +162,8 @@ curl -X POST http://127.0.0.1:3027/api/tts/audio \
   }' \
   --output stream.mp3
 ```
+
+Streaming uses the same selected backend and tagger. Set `"backend": "s2-pro"` in a request to use the old streaming path.
 
 ---
 
@@ -180,7 +184,8 @@ Set environment:
 export FISH_HELPER_URL=http://127.0.0.1:3027/
 export FISH_VOICE_ID=YOUR_FISH_REFERENCE_ID
 export FISH_FORMAT=mp3
-export FISH_LATENCY=low
+# Optional: set FISH_LATENCY=low or FISH_TTS_BACKEND=s2-pro to override the helper defaults
+export FISH_DIRECTION='Start gently, then build urgency.'
 export FISH_HELPER_API_KEY=YOUR_HELPER_KEY # only when the helper requires authentication
 ```
 
@@ -215,7 +220,9 @@ Request body:
 ```json
 {
   "text": "your text here",
-  "includeAsteriskNarration": false
+  "includeAsteriskNarration": false,
+  "backend": "drama-3-preview",
+  "direction": "Start gently, then build urgency."
 }
 ```
 
@@ -227,11 +234,23 @@ Request body:
   "text": "your text here",
   "voiceId": "fish_reference_id (optional when DEFAULT_FISH_REFERENCE_ID is set)",
   "format": "mp3",
-  "latency": "low",
   "includeAsteriskNarration": false,
-  "stream": false
+  "stream": false,
+  "backend": "drama-3-preview",
+  "direction": "Start gently, then build urgency."
 }
 ```
+
+For a multi-character Drama 3 scene, pass `voiceIds` and matching speaker markers in `text`:
+
+```json
+{
+  "text": "<|speaker:0|>Hello. <|speaker:1|>Hi there!",
+  "voiceIds": ["voice-id-alice", "voice-id-bob"]
+}
+```
+
+The helper forwards `voiceIds` as Fish Audio's `reference_id` array. Speaker indexes must exist in that array. Single-speaker requests can continue using `voiceId` or `DEFAULT_FISH_REFERENCE_ID`.
 
 Accepted `format` values:
 - `mp3`
@@ -274,9 +293,9 @@ That means searches like:
 
 ## How the TTS tag system works
 
-The auto-tagger is **deterministic** in this standalone repo.
+The auto-tagger is **deterministic** in this standalone repo. It first identifies delivery cues, then renders them as plain-language directions for Drama 3 or as short bracket tags for the legacy S2 path.
 
-It looks for textual delivery cues and maps them to Fish-friendly tags.
+The legacy S2 path looks for textual delivery cues and maps them to Fish-friendly tags.
 
 Examples:
 
@@ -300,7 +319,7 @@ If text already contains inline Fish tags like:
 [whisper] come here
 ```
 
-…it preserves recognized square-bracket tags exactly where they appear in the text sent to Fish. Parentheses and unknown bracketed phrases remain ordinary speech, preventing accidental commands from normal prose.
+…the legacy path preserves recognized square-bracket tags exactly where they appear in the text sent to Fish. The Drama 3 path converts recognized tags into natural-language directions and preserves existing Drama 3 directions when preview text is reused. Parentheses and unknown bracketed phrases remain ordinary speech.
 
 Explicit tags are never duplicated for intensity. Automatically inferred high-intensity tags may still be repeated intentionally.
 

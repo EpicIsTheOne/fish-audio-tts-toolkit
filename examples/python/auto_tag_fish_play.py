@@ -14,7 +14,9 @@ HELPER_URL = os.getenv('FISH_HELPER_URL', 'http://127.0.0.1:3027/')
 HELPER_API_KEY = os.getenv('FISH_HELPER_API_KEY', '').strip()
 VOICE_ID = os.getenv('FISH_VOICE_ID', '').strip()
 FORMAT = os.getenv('FISH_FORMAT', 'mp3').strip() or 'mp3'
-LATENCY = os.getenv('FISH_LATENCY', 'low').strip() or 'low'
+LATENCY = os.getenv('FISH_LATENCY', '').strip()
+BACKEND = os.getenv('FISH_TTS_BACKEND', '').strip()
+DIRECTION = os.getenv('FISH_DIRECTION', '').strip()
 INCLUDE_ASTERISK_NARRATION = os.getenv('FISH_INCLUDE_ASTERISK_NARRATION', 'false').lower() == 'true'
 
 
@@ -36,6 +38,8 @@ def auto_tag_and_play(text: str, voice_id: str):
     tag_result = post_json('/api/tts/tag', {
         'text': text,
         'includeAsteriskNarration': INCLUDE_ASTERISK_NARRATION,
+        **({'backend': BACKEND} if BACKEND else {}),
+        **({'direction': DIRECTION} if DIRECTION else {}),
     })
 
     audio_response = requests.post(
@@ -44,9 +48,11 @@ def auto_tag_and_play(text: str, voice_id: str):
             'text': text,
             'voiceId': voice_id,
             'format': FORMAT,
-            'latency': LATENCY,
             'includeAsteriskNarration': INCLUDE_ASTERISK_NARRATION,
             'stream': False,
+            **({'latency': LATENCY} if LATENCY else {}),
+            **({'backend': BACKEND} if BACKEND else {}),
+            **({'direction': DIRECTION} if DIRECTION else {}),
         },
         headers={'X-Fish-Helper-Key': HELPER_API_KEY} if HELPER_API_KEY else {},
         timeout=240,
