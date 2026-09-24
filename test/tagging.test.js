@@ -73,7 +73,7 @@ test('voice break and relief recovery are tagged in the target sentence', async 
   for (const mode of ['conservative', 'expressive']) {
     const result = await tagTtsText({ text: 'Her voice breaks, then she steadies herself with relief.', mode });
     assert.equal(result.spokenText, 'Her voice breaks, then she steadies herself with relief.');
-    assert.equal(result.taggedText, '[shaky voice] [calm steady tone] Her voice breaks, then she steadies herself with relief.');
+    assert.equal(result.taggedText, '[shaky voice] Her voice breaks, [calm steady tone] then she steadies herself with relief.');
     assert.deepEqual(result.tags, ['shaky voice', 'calm steady tone']);
   }
 });
@@ -119,4 +119,50 @@ test('RP cleanup removes actions without deleting emphasized speech', () => {
   assert.equal(stripRpNarrationForTts('This is **important** text.'), 'This is important text.');
   assert.equal(stripRpNarrationForTts('This is _important_ text.'), 'This is important text.');
   assert.equal(stripRpNarrationForTts('Use _snake_case_ in this sentence.'), 'Use _snake_case_ in this sentence.');
+  assert.equal(stripRpNarrationForTts('Read *this* aloud.'), 'Read this aloud.');
+  assert.equal(stripRpNarrationForTts('*I agree* is emphasized speech.'), 'I agree is emphasized speech.');
+});
+
+test('narration directions follow their own speech spans', async () => {
+  const result = await tagTtsText({ text: '*she whispers* "Hello." *she shouts* "Run!"' });
+  assert.equal(result.taggedText, '[whisper] Hello. [loud] Run!');
+  assert.deepEqual(result.tags, ['whisper', 'loud']);
+  assert.equal((await tagTtsText({ text: 'Hello *she whispers*' })).taggedText, '[whisper] Hello');
+});
+
+test('a change in delivery within one sentence gets a tag at the transition', async () => {
+  const result = await tagTtsText({ text: 'She whispers, then screams, "Run!"' });
+  assert.equal(result.taggedText, '[whisper] She whispers, [screaming] then screams, Run!');
+  assert.deepEqual(result.tags, ['whisper', 'screaming']);
+  assert.equal((await tagTtsText({ text: 'She whispers, then speaks normally.' })).taggedText,
+    '[whisper] She whispers, then speaks normally.');
+});
+
+test('an explicit return to normal speech clears a prior narration direction', async () => {
+  const result = await tagTtsText({ text: '*she whispers* "Hello." Then she speaks normally.' });
+  assert.equal(result.taggedText, '[whisper] Hello. Then she speaks normally.');
+});
+
+test('text cleanup preserves spoken emphasis, hash marks, URLs, and abbreviations', async () => {
+  assert.equal((await tagTtsText({ text: 'Read *this* aloud.' })).taggedText, 'Read this aloud.');
+  assert.equal((await tagTtsText({ text: 'A 50% discount #1 is available.' })).taggedText, 'A 50% discount #1 is available.');
+  assert.equal((await tagTtsText({ text: 'Visit https://example.com/path?x=1&y=2.' })).taggedText, 'Visit https://example.com/path?x=1&y=2.');
+  assert.equal((await tagTtsText({ text: 'Dr. Smith whispers. Then he speaks normally.' })).taggedText,
+    '[whisper] Dr. Smith whispers. Then he speaks normally.');
+});
+
+test('quoted cue words and instructions are not treated as delivery directions', async () => {
+  for (const text of [
+    'The word "scream" appears in this sentence.',
+    'The phrase "whisper softly" appears in the note.',
+    'The script says "she screams" here.',
+    'The instructions say to whisper, but please read this normally.'
+  ]) {
+    assert.deepEqual((await tagTtsText({ text })).tags, []);
+  }
+});
+
+test('narration without speech is rejected', async () => {
+  await assert.rejects(() => tagTtsText({ text: '*she laughs softly*' }),
+    { message: /must include speech/, statusCode: 400 });
 });

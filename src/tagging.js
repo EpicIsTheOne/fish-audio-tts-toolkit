@@ -43,7 +43,7 @@ export function stripEmojiForTts(value = '') {
 
 export function cleanTtsSpeechText(value = '') {
   return String(value || '')
-    .replace(/#/g, ' ')
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
     .replace(/^[\s:;,.;!?—-]+/g, '')
     .replace(/[\s:;—-]+$/g, '')
     .replace(/\s+/g, ' ')
@@ -144,24 +144,65 @@ function isNegatedMatch(text, index) {
     || /\b(?:don't|doesn't|didn't|isn't|wasn't|weren't|shouldn't|wouldn't|couldn't|can't)\b[^.!?;,:]{0,24}$/i.test(prefix);
 }
 
+function isMentionedCue(text, index) {
+  const prefix = String(text || '').slice(Math.max(0, index - 80), index);
+  return /\b(?:the|a)\s+(?:word|phrase|term)\s*["'“‘]?\s*$/i.test(prefix)
+    || /\b(?:the|a)\s+(?:word|phrase|term|script|sentence|example|note)\s+(?:says?|reads?|includes?|mentions?)?\s*["'“‘][^"'”’]{0,60}$/i.test(prefix)
+    || /\b(?:instructions?|script|sentence|example|notes?)\s+(?:say|says|said|mention|mentions|include|includes)\s+(?:to\s+)?["'“‘]?\s*$/i.test(prefix);
+}
+
 function countPatternMatches(text = '', pattern) {
   const flags = pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`;
   const regex = new RegExp(pattern.source, flags);
-  return [...String(text || '').matchAll(regex)].filter((match) => !isNegatedMatch(text, match.index || 0)).length;
+  return [...String(text || '').matchAll(regex)].filter((match) =>
+    !isNegatedMatch(text, match.index || 0) && !isMentionedCue(text, match.index || 0)).length;
+}
+
+const ACTION_VERB = /(?:whisper|murmur|shout|yell|scream|laugh|chuckle|giggle|sigh|gasp|whimper|moan|cry|sob|smile|nod|look|turn|walk|step|pause|breathe|exhale|inhale|tremble|shake|steady|recover|relax|raise|lower|grin|frown|lean|sit|stand|speak|spoke|say|said)(?:s|es|ed|ing)?\b/i;
+
+function isNarrationAction(value) {
+  const text = String(value || '').trim();
+  return new RegExp(`^(?:(?:she|he|they|i|we|you|it|[A-Z][a-z]+)\\s+(?:(?:is|was|were|are|am)\\s+)?)?(?:(?:softly|quietly|loudly|gently)\\s+)?${ACTION_VERB.source}`, 'i').test(text);
+}
+
+function parseSpeechSegments(rawText, includeAsteriskNarration = false) {
+  const raw = String(rawText || '');
+  if (includeAsteriskNarration) return [{ speech: raw.replace(/["“”]/g, '').replace(/\s+/g, ' ').trim(), source: raw.replace(/\s+/g, ' ').trim(), direction: '' }];
+
+  const segments = [];
+  const markup = /\*\*([^*\r\n]{1,500})\*\*|__([^_\r\n]{1,500})__|\*([^*\r\n]{1,500})\*|(?<!\w)_([^_\r\n]{1,500})_(?!\w)/g;
+  let speech = '';
+  let direction = '';
+  let lastIndex = 0;
+  const flush = () => {
+    const source = speech.replace(/\s+/g, ' ').trim();
+    const cleaned = source.replace(/["“”]/g, '');
+    if (cleaned) segments.push({ speech: cleaned, source, direction });
+    speech = '';
+  };
+
+  for (const match of raw.matchAll(markup)) {
+    speech += raw.slice(lastIndex, match.index);
+    const content = match[1] || match[2] || match[3] || match[4];
+    if ((match[3] || match[4]) && isNarrationAction(content)) {
+      flush();
+      direction = content;
+    } else {
+      speech += content;
+    }
+    lastIndex = match.index + match[0].length;
+  }
+  speech += raw.slice(lastIndex);
+  if (!speech.trim() && direction && segments.length && lastIndex === raw.length) {
+    segments.at(-1).direction = direction;
+  }
+  flush();
+  return segments;
 }
 
 export function stripRpNarrationForTts(rawText = '', options = {}) {
-  const raw = String(rawText || '');
-  const includeAsteriskNarration = options.includeAsteriskNarration === true;
-  if (includeAsteriskNarration) return raw.replace(/["“”]/g, '').replace(/\s+/g, ' ').trim();
-  return raw
-    .replace(/\*\*([^*]{1,500})\*\*/g, '$1')
-    .replace(/\*([^*]{1,500})\*/g, ' ')
-    .replace(/__([^_]{1,500})__/g, '$1')
-    .replace(/(^|\s)_([^_\r\n]{1,500})_(?=\s|[.,!?;:]|$)/g, '$1$2')
-    .replace(/["“”]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return parseSpeechSegments(rawText, options.includeAsteriskNarration === true)
+    .map(({ speech }) => speech).join(' ').replace(/\s+/g, ' ').trim();
 }
 
 export function capTtsEmotionTagRepeats(tags = [], maxPerTag = 5, maxTotal = 20) {
@@ -270,28 +311,54 @@ export function inferTtsDeliveryTags(context = '', speech = '', options = {}) {
 }
 
 function splitSpeechClauses(text) {
-  return text.match(/[^.!?]+(?:[.!?]+|$)/g)?.map((clause) => clause.trim()).filter(Boolean) || [];
+  const clauses = [];
+  const boundary = /[.!?]+(?=["”’']?\s|$)/g;
+  const abbreviations = new Set(['dr.', 'mr.', 'mrs.', 'ms.', 'prof.', 'sr.', 'jr.', 'st.', 'etc.', 'e.g.', 'i.e.']);
+  let start = 0;
+  for (const match of text.matchAll(boundary)) {
+    const end = match.index + match[0].length;
+    const preceding = text.slice(start, end).trim();
+    const lastToken = preceding.split(/\s+/).at(-1)?.toLowerCase();
+    if (abbreviations.has(lastToken)) continue;
+    clauses.push(preceding);
+    start = end;
+  }
+  const rest = text.slice(start).trim();
+  if (rest) clauses.push(rest);
+  return clauses.filter(Boolean).flatMap((clause) => {
+    const transition = /,\s+(?=then\b)/gi;
+    const parts = [];
+    let start = 0;
+    for (const match of clause.matchAll(transition)) {
+      const left = clause.slice(start, match.index + 1).trim();
+      const right = clause.slice(match.index + match[0].length).trim();
+      const hasCue = (value) => TTS_DELIVERY_CUES.some((cue) => cue.patterns.some((pattern) => countPatternMatches(value, pattern) > 0));
+      if (!hasCue(left) || !(hasCue(right) || resetsDelivery(right))) continue;
+      parts.push(left);
+      start = match.index + match[0].length;
+    }
+    parts.push(clause.slice(start).trim());
+    return parts.filter(Boolean);
+  });
 }
 
-function extractNarrationDirection(raw) {
-  return [...String(raw || '').matchAll(/\*{1,2}([^*\r\n]{1,500})\*{1,2}|_{1,2}([^_\r\n]{1,500})_{1,2}/g)]
-    .map((match) => match[1] || match[2])
-    .map((value) => value.trim()).filter(Boolean).join(' ');
+function resetsDelivery(text) {
+  return /\b(?:speaks?|says?|talks?|reads?)\s+(?:in\s+(?:a|her|his|their)\s+)?(?:normal|usual|regular)\s+(?:voice|tone)\b|\b(?:speaks?|says?|talks?|reads?)\s+normally\b/i.test(text);
 }
 
 function inferClauseResults(rawText, options = {}) {
   const includeAsteriskNarration = options.includeAsteriskNarration === true;
-  const speech = cleanTtsSpeechText(stripRpNarrationForTts(rawText, { includeAsteriskNarration }));
-  const narration = includeAsteriskNarration ? '' : extractNarrationDirection(rawText);
+  const segments = parseSpeechSegments(rawText, includeAsteriskNarration);
   const mode = normalizeTagMode(options.mode);
-  const maxTags = getTtsTagLimitForText(speech || rawText);
-  return splitSpeechClauses(speech).map((clause) => {
+  const maxTags = getTtsTagLimitForText(segments.map(({ speech }) => speech).join(' ') || rawText);
+  return segments.flatMap(({ source, direction }) => splitSpeechClauses(source).map((rawClause) => {
+    const clause = rawClause.replace(/["“”]/g, '').trim();
     const hasExplicit = hasInlineFishEmotionTags(clause);
     const detail = hasExplicit
       ? { tags: parseTtsEmotionTags(clause), reasoning: [], confidence: 1 }
-      : inferTtsDeliveryTagsDetailed(narration, clause, { maxTags, mode });
+      : inferTtsDeliveryTagsDetailed(resetsDelivery(rawClause) ? '' : direction, rawClause, { maxTags, mode });
     return { clause, hasExplicit, ...detail };
-  });
+  }));
 }
 
 export function renderFishDirectedTtsText(rawText = '', options = {}) {
@@ -307,13 +374,18 @@ export function renderFishDirectedTtsText(rawText = '', options = {}) {
     }).join(' ');
     return { text, tags, reasoning: clauseResults.flatMap((result) => result.reasoning || []), confidence: Math.max(0, ...clauseResults.map((result) => result.confidence || 0)) };
   }
-  return { text: normalizeTtsText(raw), tags: [], reasoning: [], confidence: 0 };
+  return { text: normalizeTtsText(stripRpNarrationForTts(raw, { includeAsteriskNarration })), tags: [], reasoning: [], confidence: 0 };
 }
 
 export async function tagTtsText({ text, includeAsteriskNarration = false, mode = 'conservative' } = {}) {
   const rawText = String(text || '').trim();
   const spokenText = cleanTtsSpeechText(stripRpNarrationForTts(rawText, { includeAsteriskNarration }));
-  const normalizedText = normalizeTtsText(spokenText || rawText);
+  if (!spokenText) {
+    const error = new Error('Text must include speech after removing narration');
+    error.statusCode = 400;
+    throw error;
+  }
+  const normalizedText = normalizeTtsText(spokenText);
 
   const textWithoutTags = stripInlineFishEmotionTags(normalizedText);
   if (hasInlineFishEmotionTags(normalizedText) && !textWithoutTags) {

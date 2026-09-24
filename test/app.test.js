@@ -90,6 +90,19 @@ test('audio route uses the default voice and preserves explicit tags upstream', 
   });
 });
 
+test('audio route sends correctly placed narration tags to Fish', async () => {
+  await withUpstream(async (fishBaseUrl, getPayload) => {
+    await withServer({ fishApiKey: 'configured', fishBaseUrl, defaultVoiceId: 'voice' }, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/tts/audio`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: '*she whispers* "Hello." *she shouts* "Run!"' })
+      });
+      assert.equal(response.status, 200);
+      assert.equal(getPayload().text, '[whisper] Hello. [loud] Run!');
+    });
+  });
+});
+
 test('remote binding requires helper authentication', () => {
   assert.equal(isLoopbackHost('127.0.0.1'), true);
   assert.equal(isLoopbackHost('0.0.0.0'), false);

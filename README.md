@@ -306,6 +306,8 @@ Explicit tags are never duplicated for intensity. Automatically inferred high-in
 
 Markdown bold and simple underscore emphasis are unwrapped without deleting their text; identifiers such as `_snake_case_` are preserved. Single-asterisk roleplay actions are removed unless `includeAsteriskNarration` is enabled.
 
+The tagger keeps emphasized speech such as `*this*`, applies each roleplay delivery direction to its nearby speech, and puts new tags at clear delivery transitions such as `then screams`. Input containing only narration returns a 400 error because there is no speech to synthesize.
+
 ---
 
 ## Development checks
