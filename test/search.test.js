@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fetchFishModels } from '../src/search.js';
+import { fetchFishModels, searchFishModelsByName } from '../src/search.js';
 
 test('model cache is bounded and behaves as an LRU cache', async (t) => {
   const originalFetch = globalThis.fetch;
@@ -22,4 +22,20 @@ test('model cache is bounded and behaves as an LRU cache', async (t) => {
   assert.equal(cache.size, 2);
   assert.equal(cache.has('title=one'), true);
   assert.equal(cache.has('title=two'), false);
+});
+
+test('explicit voice hints affect search ranking', async (t) => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ items: [
+    { _id: 'male', title: 'Sample Voice', state: 'trained', tags: ['male'] },
+    { _id: 'female', title: 'Sample Voice', state: 'trained', tags: ['female'] }
+  ] }), { status: 200, headers: { 'content-type': 'application/json' } });
+  t.after(() => { globalThis.fetch = originalFetch; });
+
+  const result = await searchFishModelsByName('Sample Voice', {
+    apiKey: 'test', baseUrl: 'https://example.invalid',
+    hints: { genders: ['female'], languages: [], tags: [] }, signal: null
+  });
+  assert.equal(result.items[0]._id, 'female');
+  assert.deepEqual(result.hints.genders, ['female']);
 });

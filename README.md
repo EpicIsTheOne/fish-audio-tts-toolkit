@@ -181,6 +181,7 @@ export FISH_HELPER_URL=http://127.0.0.1:3027/
 export FISH_VOICE_ID=YOUR_FISH_REFERENCE_ID
 export FISH_FORMAT=mp3
 export FISH_LATENCY=low
+export FISH_HELPER_API_KEY=YOUR_HELPER_KEY # only when the helper requires authentication
 ```
 
 Run it:

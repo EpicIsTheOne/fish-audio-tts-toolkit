@@ -147,7 +147,7 @@ export async function searchFishModelsByName(query, { apiKey, baseUrl, cache, tt
   const normalizedQuery = normalizeVoiceSearchText(query);
   if (!normalizedQuery) return { query, items: [], bestMatch: null };
 
-  const resolvedHints = character ? inferCharacterVoiceHints(character) : inferCharacterVoiceHints(hints || null);
+  const resolvedHints = character ? inferCharacterVoiceHints(character) : hints || inferCharacterVoiceHints();
   const tokens = tokenizeVoiceSearchText(normalizedQuery);
   const lookups = [{ title: normalizedQuery, page_size: pageSize, sort_by: 'score' }];
   if (tokens.length > 1) lookups.push({ title: tokens[0], page_size: pageSize, sort_by: 'score' });

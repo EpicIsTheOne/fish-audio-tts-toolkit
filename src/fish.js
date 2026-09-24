@@ -81,6 +81,12 @@ export async function streamFishTts({ apiKey, baseUrl, backend = 's2-pro', text,
     const cleanup = () => signal?.removeEventListener('abort', handleAbort);
     const finishSuccess = () => {
       if (settled) return;
+      if (bytesReceived === 0) {
+        const error = new Error('Fish Audio returned empty audio');
+        error.statusCode = 502;
+        finishError(error);
+        return;
+      }
       settled = true;
       cleanup();
       resolve({ bytesReceived });

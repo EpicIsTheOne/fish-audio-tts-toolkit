@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
+import { WebSocketServer } from 'ws';
 import { createApp, isLoopbackHost, startServer } from '../src/index.js';
 
 async function withServer(config, callback) {
@@ -93,4 +94,27 @@ test('remote binding requires helper authentication', () => {
   assert.equal(isLoopbackHost('127.0.0.1'), true);
   assert.equal(isLoopbackHost('0.0.0.0'), false);
   assert.throws(() => startServer({ host: '0.0.0.0', port: 0, helperApiKey: '' }), /Refusing to bind/);
+});
+
+test('empty realtime output returns an upstream error instead of successful audio', async () => {
+  const upstream = createServer();
+  const websocket = new WebSocketServer({ server: upstream, path: '/v1/tts/live' });
+  websocket.on('connection', (client) => client.close());
+  upstream.listen(0, '127.0.0.1');
+  await once(upstream, 'listening');
+  const fishBaseUrl = `http://127.0.0.1:${upstream.address().port}`;
+  try {
+    await withServer({ fishApiKey: 'configured', fishBaseUrl, defaultVoiceId: 'voice' }, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/tts/audio`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Hello', stream: true })
+      });
+      assert.equal(response.status, 502);
+      assert.equal((await response.json()).error, 'TTS unavailable');
+    });
+  } finally {
+    websocket.close();
+    upstream.close();
+    await once(upstream, 'close');
+  }
 });

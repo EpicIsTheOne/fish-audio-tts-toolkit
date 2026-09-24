@@ -10,11 +10,20 @@
     "test": "node --test",
     "check": "node --check src/index.js && node --check src/fish.js && node --check src/search.js && node --check src/tagging.js"
   },
-  "keywords": ["fish-audio", "tts", "voice-search", "emotion-tags", "express"],
+  "keywords": [
+    "fish-audio",
+    "tts",
+    "voice-search",
+    "emotion-tags",
+    "express"
+  ],
   "license": "MIT",
   "dependencies": {
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
     "fish-audio": "^0.1.0"
+  },
+  "devDependencies": {
+    "ws": "^8.21.3"
   }
 }

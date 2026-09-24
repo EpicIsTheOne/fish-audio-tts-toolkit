@@ -180,7 +180,7 @@ export function createApp(configOverrides = {}) {
       res.end(audio.buffer);
     } catch (error) {
       if (!res.headersSent) res.status(getErrorStatus(error)).json({ ok: false, error: 'TTS unavailable', detail: String(error?.message || error) });
-      else res.end();
+      else res.destroy();
     } finally {
       clearTimeout(timeout);
       req.off('aborted', abortOnDisconnect);

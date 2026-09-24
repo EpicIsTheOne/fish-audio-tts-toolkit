@@ -11,6 +11,7 @@ from playsound3 import playsound
 load_dotenv()
 
 HELPER_URL = os.getenv('FISH_HELPER_URL', 'http://127.0.0.1:3027/')
+HELPER_API_KEY = os.getenv('FISH_HELPER_API_KEY', '').strip()
 VOICE_ID = os.getenv('FISH_VOICE_ID', '').strip()
 FORMAT = os.getenv('FISH_FORMAT', 'mp3').strip() or 'mp3'
 LATENCY = os.getenv('FISH_LATENCY', 'low').strip() or 'low'
@@ -18,7 +19,12 @@ INCLUDE_ASTERISK_NARRATION = os.getenv('FISH_INCLUDE_ASTERISK_NARRATION', 'false
 
 
 def post_json(path: str, payload: dict, expect_json: bool = True):
-    response = requests.post(urljoin(HELPER_URL, path.lstrip('/')), json=payload, timeout=120)
+    response = requests.post(
+        urljoin(HELPER_URL.rstrip('/') + '/', path.lstrip('/')),
+        json=payload,
+        headers={'X-Fish-Helper-Key': HELPER_API_KEY} if HELPER_API_KEY else {},
+        timeout=120,
+    )
     response.raise_for_status()
     return response.json() if expect_json else response
 
@@ -33,7 +39,7 @@ def auto_tag_and_play(text: str, voice_id: str):
     })
 
     audio_response = requests.post(
-        urljoin(HELPER_URL, '/api/tts/audio'),
+        urljoin(HELPER_URL.rstrip('/') + '/', 'api/tts/audio'),
         json={
             'text': text,
             'voiceId': voice_id,
@@ -42,6 +48,7 @@ def auto_tag_and_play(text: str, voice_id: str):
             'includeAsteriskNarration': INCLUDE_ASTERISK_NARRATION,
             'stream': False,
         },
+        headers={'X-Fish-Helper-Key': HELPER_API_KEY} if HELPER_API_KEY else {},
         timeout=240,
     )
     audio_response.raise_for_status()
