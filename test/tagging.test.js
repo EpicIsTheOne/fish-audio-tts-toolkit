@@ -156,6 +156,7 @@ test('quoted cue words and instructions are not treated as delivery directions',
     'The word "scream" appears in this sentence.',
     'The phrase "whisper softly" appears in the note.',
     'The script says "she screams" here.',
+    'She says "whisper" and smiles.',
     'The instructions say to whisper, but please read this normally.'
   ]) {
     assert.deepEqual((await tagTtsText({ text })).tags, []);

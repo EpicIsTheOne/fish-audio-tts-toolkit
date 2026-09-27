@@ -147,6 +147,7 @@ function isNegatedMatch(text, index) {
 function isMentionedCue(text, index) {
   const prefix = String(text || '').slice(Math.max(0, index - 80), index);
   return /\b(?:the|a)\s+(?:word|phrase|term)\s*["'“‘]?\s*$/i.test(prefix)
+    || /\b(?:she|he|they|i|we|you)\s+(?:says?|said|reads?|read|mentions?|mentioned)\s+["'“‘][^"'”’]{0,60}$/i.test(prefix)
     || /\b(?:the|a)\s+(?:word|phrase|term|script|sentence|example|note)\s+(?:says?|reads?|includes?|mentions?)?\s*["'“‘][^"'”’]{0,60}$/i.test(prefix)
     || /\b(?:instructions?|script|sentence|example|notes?)\s+(?:say|says|said|mention|mentions|include|includes)\s+(?:to\s+)?["'“‘]?\s*$/i.test(prefix);
 }

@@ -62,10 +62,18 @@ function isProseDirection(value) {
     && /[.!?]$/.test(value);
 }
 
+function isDirectionAt(text, index, content) {
+  if (!isProseDirection(content)) return false;
+  if (Object.values(DIRECTIONS).includes(content)) return true;
+  const before = text.slice(0, index).trimEnd();
+  return !before || /(?:[.!?]|<\|speaker:\d+\|>|\])$/.test(before);
+}
+
 function protectDirections(text) {
   const saved = [];
-  const protectedText = String(text || '').replace(/\[([^\]\r\n]{1,320})\]/g, (match, content) => {
-    if (!isProseDirection(content)) return match;
+  const input = String(text || '');
+  const protectedText = input.replace(/\[([^\]\r\n]{1,320})\]/g, (match, content, index) => {
+    if (!isDirectionAt(input, index, content)) return match;
     const placeholder = `[DRAMADIRECTIONPLACEHOLDER${saved.length}]`;
     saved.push({ placeholder, original: match });
     return placeholder;
@@ -87,13 +95,24 @@ export async function tagDrama3Text({ text, includeAsteriskNarration = false, mo
   if (userDirection) {
     rendered = `[${userDirection}] ${rendered}`;
   }
+  rendered = rendered.replace(/(\[([^\]\r\n]+)\])(?:\s+\1)+/g, (match, bracket, content) =>
+    isProseDirection(content) ? bracket : match);
   // Fish speaker markers must precede the direction for that speaker.
-  rendered = rendered.replace(/^((?:\[[^\]]+\]\s*)+)(<\|speaker:\d+\|>)/, '$2$1');
+  rendered = rendered.replace(/((?:\[[^\]]+\]\s*)+)(<\|speaker:\d+\|>)/g,
+    (match, block, speaker, index) => {
+      const prefix = rendered.slice(0, index).trimEnd();
+      const directions = [...block.matchAll(/\[([^\]]+)\]/g)];
+      if ((!prefix || /[.!?]$/.test(prefix)) && directions.every((entry) => isProseDirection(entry[1]))) {
+        return `${speaker}${block}`;
+      }
+      return match;
+    });
   const taggedText = normalizeTtsText(rendered);
   const directions = [...taggedText.matchAll(/\[([^\]\r\n]{1,320})\]/g)]
-    .map((match) => match[1]).filter(isProseDirection);
-  const spokenText = taggedText.replace(/\[([^\]\r\n]{1,320})\]/g, (match, content) =>
-    isProseDirection(content) ? ' ' : match)
+    .filter((match) => isDirectionAt(taggedText, match.index, match[1]))
+    .map((match) => match[1]);
+  const spokenText = taggedText.replace(/\[([^\]\r\n]{1,320})\]/g, (match, content, index) =>
+    isDirectionAt(taggedText, index, content) ? ' ' : match)
     .replace(/<\|speaker:\d+\|>/g, '').replace(/\s+/g, ' ').trim();
   if (!spokenText) {
     const error = new Error('Text must include speech in addition to directions');

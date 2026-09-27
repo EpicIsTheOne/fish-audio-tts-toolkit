@@ -20,6 +20,22 @@ test('Drama 3 keeps speaker markers before each speaker direction', async () => 
   assert.equal(result.spokenText, 'Hello. Stay close.');
 });
 
+test('Drama 3 moves later narration directions after their speaker markers', async () => {
+  const result = await tagDrama3Text({
+    text: '*she whispers* <|speaker:0|>Hello. *she shouts* <|speaker:1|>Run!'
+  });
+  assert.equal(result.taggedText,
+    '<|speaker:0|>[Speak in a close, soft whisper.] Hello. <|speaker:1|>[Project the voice loudly.] Run!');
+  assert.equal(result.spokenText, 'Hello. Run!');
+});
+
+test('Drama 3 keeps bracketed words within speech', async () => {
+  const result = await tagDrama3Text({ text: 'Read [Start here.] aloud.' });
+  assert.equal(result.taggedText, 'Read [Start here.] aloud.');
+  assert.equal(result.spokenText, 'Read [Start here.] aloud.');
+  assert.deepEqual(result.directions, []);
+});
+
 test('Drama 3 rejects malformed custom directions', async () => {
   await assert.rejects(() => tagDrama3Text({ text: 'Hello.', direction: '[whisper]' }),
     { statusCode: 400 });
@@ -31,6 +47,13 @@ test('Drama 3 preview text can be reused without duplicate directions', async ()
   assert.equal(second.taggedText, first.taggedText);
   assert.equal(second.spokenText, 'Come closer.');
   assert.deepEqual(second.directions, ['Speak in a close, soft whisper.']);
+});
+
+test('Drama 3 inference stays idempotent when spoken words repeat a delivery cue', async () => {
+  const first = await tagDrama3Text({ text: 'She whispers, then screams, "Run!"' });
+  const second = await tagDrama3Text({ text: first.taggedText });
+  assert.equal(second.taggedText, first.taggedText);
+  assert.equal(second.spokenText, 'She whispers, then screams, Run!');
 });
 
 test('free-form directions without punctuation remain reusable', async () => {
